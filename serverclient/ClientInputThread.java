@@ -102,6 +102,7 @@ public class ClientInputThread extends Thread {
 					// Show the command on the server side
 					//					logger.log(Level.INFO,"Command received: " + temp);
 					mParser.parseInput(temp);
+					this.host.resetTimer();
 				}
 			} 
 

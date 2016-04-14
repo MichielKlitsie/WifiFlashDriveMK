@@ -34,6 +34,9 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 	private String strIPAddressDest;
 	private InetAddress IPAddressDest;
 	private DataTransferProtocol protocolImpl;
+	
+	private long startTime;
+	private long stopTime;
 
 	//--------------------------------------------------------
 	// Constructor
@@ -41,6 +44,7 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 	public FileSenderThread(FileHost host, String fullfile, String IPAddressDest) {
 		super("FileSenderThread");
 		this.host = host;
+		this.host.resetTimer();
 
 		// File is already checked before opening thread
 		try {
@@ -48,11 +52,8 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 			this.file = new File(fullfile);
 
 			// Try constructing destination IP address
-			//
-			// TODO: CHANGE IPADDRES
-			//
-			//		this.strIPAddressDest = IPAddressDest;
-			this.strIPAddressDest = piAddress;
+			this.strIPAddressDest = IPAddressDest.trim();
+			//			this.strIPAddressDest = piAddress;
 			this.IPAddressDest = InetAddress.getByName(strIPAddressDest);
 
 
@@ -70,6 +71,7 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 	//--------------------------------------------------------
 	@Override
 	public void run() {
+		this.startTime = System.currentTimeMillis();
 		//--------------------------------------------------------
 		// RUN: SETUP PHASE
 		//--------------------------------------------------------
@@ -118,7 +120,7 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 			// RUN: FILETRANSFER PHASE
 			//--------------------------------------------------------
 			System.out.println("[SENDER]("+ getClass().getName() + ") Starting file transfer\n\n");
-			
+
 			// INITIALIZE VARIABLES WITH FIRST PACKAGE 
 			UDPPacketMK dataPacketMK = newFileSender.getFilePacket(0);
 			DatagramPacket sendDataPacket = new DatagramPacket(dataPacketMK.getAsRegularUDPData(),
@@ -128,7 +130,7 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 
 			boolean transferFinished = false;
 			int[] currentWindow = new int[]{receiveSetupAck.getWindow()[0], receiveSetupAck.getWindow()[1]};
-			
+
 			while(!transferFinished) {
 				// BATCH: SEND A BATCH OF WINDOW SIZE
 				for (int i = currentWindow[0]; i<currentWindow[1]; i++) {
@@ -144,20 +146,41 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 				// BATCH: WAIT FOR ACKNOWLEDGMENT
 				System.out.println("[SENDER]("+ getClass().getName() + ") Waiting for transfer acknowledgment...");
 				dsock.receive(receivePacket);
-
-				// BATCH: GET NEW WINDOW
 				UDPPacketMK receiveTransferAck = new UDPPacketMK(receivePacket.getData());
-				if (receiveTransferAck.getFlag() != Flag.TRANSFERFINAL) {
-					System.out.println("[SENDER]("+ getClass().getName() + ") Packet with flag: " + receiveTransferAck.getFlag() + " for file of " + receiveTransferAck.getAmountPackets() + " packets. Expected window: [" + receiveTransferAck.getWindow()[0] + "," + receiveTransferAck.getWindow()[1] + "]");
+				
+				// OPTION 1: RESENDING MISSING PACKAGES
+				if (receiveTransferAck.getFlag() == Flag.RESEND) {
+					System.out.println("[SENDER]("+ getClass().getName() + ") Packet with flag: " + receiveTransferAck.getFlag() + ". Resending missing packages.");
+					// Get the ack window of seq nrs to be resend
+					int[] resendPackagesPadded = receiveTransferAck.getAcknowlegdment();
+					int[] resendPackages = utils.Utils.trimIntArray(resendPackagesPadded);
+					for (int j = 0; j<resendPackages.length; j++) {
+						int seqNr = resendPackages[j];
+						dataPacketMK = newFileSender.getFilePacket(seqNr);
+
+						sendDataPacket = new DatagramPacket(dataPacketMK.getAsRegularUDPData(),
+								dataPacketMK.getAsRegularUDPData().length,
+								this.IPAddressDest,
+								TRANSFERPORT);	
+						dsock.send(sendDataPacket);
+						System.out.println("[SENDER]("+ getClass().getName() + ") Packet nr " + (seqNr+1) + " resend. Datasize: " + dataPacketMK.getDataLength() + " bytes. Checksum: " + dataPacketMK.getChecksumPacket());	
+					}
+
+					// OPTION 2: LAST PACKAGES HAS BEEN SEND
+				} else if (receiveTransferAck.getFlag() == Flag.TRANSFERFINAL){
+					System.out.println("[SENDER]("+ getClass().getName() + ") All packets transferred.\n");
+					transferFinished = true;
+					
+					// OPTION 3: BATCH IS RECEIVED CORRECTLY, SO GET NEW WINDOW
+				} else {
+					System.out.println("[SENDER]("+ getClass().getName() + ") Packet with flag: " + receiveTransferAck.getFlag() + " for file of " + receiveTransferAck.getAmountPackets() + " packets. Expected window: [" + receiveTransferAck.getWindow()[0] + "," + receiveTransferAck.getWindow()[1] + "].");
 					currentWindow = new int[]{receiveTransferAck.getWindow()[0], receiveTransferAck.getWindow()[1]};
 
 					// ADJUST IF WINDOW EXCEEDS LAST PACKAGE
 					if (receiveTransferAck.getWindow()[1] > newFileSender.getAmountPackets()) {
 						currentWindow = new int[]{receiveTransferAck.getWindow()[0],  newFileSender.getAmountPackets()+1};				
 					}
-				} else {
-					System.out.println("[SENDER]("+ getClass().getName() + ") All packets transferred.\n");
-					transferFinished = true;
+
 				}
 			}
 
@@ -178,6 +201,7 @@ public class FileSenderThread extends Thread implements protocol.Constants {
 
 			System.out.println(">>> Whole file has been send!!!");
 			dsock.close();
+			this.stopTime = System.currentTimeMillis();
 
 
 			// Phase 4: [LOOP] Sending file packets and wait for acknowlegdement

@@ -60,6 +60,7 @@ public class UserInputParser implements protocol.Constants {
 		case "4":
 			//			client.print("[TUI]("+ getClass().getName() + ") Option 2 chosen. Transfer file");
 			client.print(TRANSFERTUI);
+			client.getHost().getDiscoveryThread().displayDiscoveredAddresses((client.getHost().getDiscoveryThread().getDiscoveredAddresses()));
 			break;
 			//--------------------------------------------------------
 			// File TRANSFER
@@ -125,6 +126,12 @@ public class UserInputParser implements protocol.Constants {
 			} else {
 				client.print("[TRANSFER]("+ getClass().getName() + ") Please use format described.\n");
 			}
+			break;
+		case "STATE":
+			client.getHost().showStateThreads();
+			break;
+		case "EXIT":
+			client.getHost().shutdown();
 			break;
 		default:
 			client.print("[CLIENT] "+ getClass().getName() + "Input not recognised.\n");

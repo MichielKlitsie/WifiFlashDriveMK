@@ -2,13 +2,12 @@ package protocol;
 
 import java.io.IOException;
 
+
 import model.FileUDPPackets;
 import model.Flag;
 import model.UDPPacketMK;
 
-import utils.ITimeoutEventHandler;
-
-public class DataTransferProtocol implements ITimeoutEventHandler {
+public class DataTransferProtocol {
 	
 	//--------------------------------------------------------
 	// CONSTRUCTOR
@@ -42,12 +41,24 @@ public class DataTransferProtocol implements ITimeoutEventHandler {
 	//--------------------------------------------------------
 	// CREATE BASE PACKET: TRANSFER ACKNOWLEDGEMENT
 	//--------------------------------------------------------
+	public UDPPacketMK createTransferResendPacket(int amountPackets, int[] resendPackages) {
+		Flag flag = Flag.RESEND;
+		UDPPacketMK transferACKPacket = new UDPPacketMK(flag, amountPackets, resendPackages);
+		return transferACKPacket;
+	}
+
+	//--------------------------------------------------------
+	// CREATE BASE PACKET: TRANSFER RESEND
+	//--------------------------------------------------------
 	public UDPPacketMK createTransferACKPacket(int amountPackets, int[] window) {
 		Flag flag = Flag.ACK;
 		UDPPacketMK transferACKPacket = new UDPPacketMK(flag, amountPackets, window);
 		return transferACKPacket;
 	}
-
+	
+	//--------------------------------------------------------
+	// CREATE BASE PACKET: FINALIZE FILE TRANSFER
+	//--------------------------------------------------------
 	public UDPPacketMK createTransferFinalPacket(FileUDPPackets file) throws IOException {
 		Flag flag = Flag.TRANSFERFINAL;
 		
@@ -57,12 +68,4 @@ public class DataTransferProtocol implements ITimeoutEventHandler {
 	}
 
 	
-	// TIMERS
-	@Override
-	public void TimeoutElapsed(Object tag) {
-		int z=(Integer)tag;
-		// handle expiration of the timeout:
-		System.out.println("Timer expired with tag="+z);
-		
-	}
 }

@@ -9,7 +9,8 @@ public enum Flag {
     CLOSE(4),    	// 000100
     ACK(8),     		// 001000
 	SETUPACK(16),
-	TRANSFERFINAL(32);
+	TRANSFERFINAL(32),
+	RESEND(64);
 	
     int state;
     Flag(int p) {

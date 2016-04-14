@@ -4,12 +4,17 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.HashMap;
+
 
 import model.FileUDPPackets;
 import model.Flag;
 import model.UDPPacketMK;
 import protocol.DataTransferProtocol;
+import utils.*;
 
 public class FileReceiverThread extends Thread implements protocol.Constants {
 
@@ -18,6 +23,10 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 	//--------------------------------------------------------
 	private boolean isConnected = false;
 	private boolean isTransferring = false;
+	private boolean isReadyForCheck = false;
+	private boolean isResending = false;
+	private boolean isReadyForNextBatch = true;
+
 	private DatagramSocket dsock;
 	private FileHost host;
 	private PacketParser mPacketParser;
@@ -25,7 +34,13 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 	private DataTransferProtocol protocolImp;
 
 	private int[] currentWindow;
+	//	private ArrayList<Integer> resendWindow;
+	private HashMap<Integer,Boolean> resendWindow2;
+
 	private int headerLength;
+
+	private DatagramPacket lastReceivedPacket;
+	private int amountTimeouts;
 
 
 	//--------------------------------------------------------
@@ -36,6 +51,7 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 		this.host = host;
 		this.mPacketParser = new PacketParser(this);
 		this.protocolImp = new DataTransferProtocol();
+		this.amountTimeouts=0;
 		createSocket();
 	}
 
@@ -60,11 +76,11 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 
 				dsock.receive(receiveSetupPacket);
 				mPacketParser.parsePacket(receiveSetupPacket);
-				
+
 				// CHANGE STATUS
 				setConnected(true);
 				setIsTransferring(true);
-				
+
 				// SET FIRST WINDOW
 				setCurrentWindow(new int[]{0, WINDOWSIZE});
 			} catch (IOException e) {
@@ -72,16 +88,18 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 				e.printStackTrace();
 			}
 		}
-		
+
 		//--------------------------------------------------------
 		// RUN: TRANSFER PHASE
 		//--------------------------------------------------------
+		this.host.resetTimer();
+	
 		// Phase 2: Setting up file transfer (creating empty file)
 		byte[] receiveTransferData = new byte[getHeaderLength() + MAXDATASIZEPACKET];
 		DatagramPacket receiveTransferPacket = new DatagramPacket(receiveTransferData,
 				receiveTransferData.length);
 		System.out.println("[RECEIVER]("+ getClass().getName() + ") Waiting for arrival of data packets."+"\n");
-		
+
 		// Phase 3: [Loop] Receiving file packets and send acknowledgements after ...
 		while(isTransferring) {
 			try {
@@ -89,27 +107,35 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 					setIsTransferring(false);
 				} else {
 					//Receiving an actual packet
-					dsock.receive(receiveTransferPacket);
-					mPacketParser.parsePacket(receiveTransferPacket);
+					try {
+						dsock.setSoTimeout(ACKTIMEOUT);
+						dsock.receive(receiveTransferPacket);
+						mPacketParser.parsePacket(receiveTransferPacket);
+					} catch (SocketTimeoutException e) {
+						System.err.println ("[RECEIVER]("+ getClass().getName() + ") Receiving timeout occurred. Asking for resending last window.");
+						
+						sendResend(this.lastReceivedPacket, this.protocolImp.createTransferResendPacket(this.amountTimeouts, new int[]{currentWindow[1]-1})); 
+					}
+
 				}
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
-		
+
 		//--------------------------------------------------------
 		// RUN: FINAL CHECKING PHASE
 		//--------------------------------------------------------
 		System.out.println("\n\n[RECEIVER]("+ getClass().getName() + ") File transfer complete.\n - bufferTotalData length: " + this.newFileReceiver.getBufferTotalData().length + "\n - Checksum data: "+ this.newFileReceiver.createChecksumFromData() + "\n");
-		
+
 		// TODO: SEND CHECKSUM TO VERIFY FILE AND RECEIVE FINAL ACKNOWLEDGMENT
-		
-		
+
+
 		try {
 			System.out.println("\n[RECEIVER]("+ getClass().getName() + ") Saving file."+"\n");
 			this.newFileReceiver.saveFile(getHost().getDataPath());
-//			this.newFileReceiver.createBufferDataFromPackets();
+			//			this.newFileReceiver.createBufferDataFromPackets();
 		} catch (IOException e) {
 			System.out.println("\n\n[RECEIVER]("+ getClass().getName() + ") Error during final file creation."+"\n");
 			e.printStackTrace();
@@ -160,7 +186,7 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 		UDPPacketMK setupPacketMK = new UDPPacketMK(receivePacket.getData());
 		String filename = utils.Utils.byteArray2String(setupPacketMK.getPacketData());
 		System.out.println("[RECEIVER]("+ getClass().getName() + ") Setting up file transfer for " + filename);
-		
+
 		// 1. Create base file1
 		//		System.out.println("[RECEIVER]("+ getClass().getName() + ") Empty file created");
 		createBaseFile(setupPacketMK);
@@ -177,7 +203,7 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 
 	public void createBaseFile(UDPPacketMK subPacket) {
 		this.newFileReceiver = new FileUDPPackets(subPacket.getAmountPackets());
-		
+
 		System.out.println("[RECEIVER]("+ getClass().getName() + ") Created empty file ready for a total of " + subPacket.getAmountPackets() + " packets."+"\n");
 	}
 
@@ -187,62 +213,100 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 	public boolean checkChecksumPacket(DatagramPacket receivePacket) {
 		// Extract the subPacketMK
 		UDPPacketMK receivePacketMK = new UDPPacketMK(receivePacket.getData());
-		
+
 		// Read checksum packet from the header
 		long checksumPacketHead = receivePacketMK.getChecksumPacket();
-		
+
 		// Calculate the checksum from the data
 		long checksumPacketCalc = receivePacketMK.createChecksumPacket();
-		
+
 		System.out.println("[RECEIVER]("+ getClass().getName() + ") Data-packet " + (receivePacketMK.getSeqNr() + 1) + " received ("+ receivePacketMK.getDataLength() +" bytes). Checksum calculated: " + checksumPacketCalc);
-		
+
 		// Compare
 		return checksumPacketHead == checksumPacketCalc;
 	}
-	
-	
-	public void writeDataPacket(DatagramPacket receivePacket) {
+
+
+	public void writeDataPacket(DatagramPacket receivePacket) throws IOException {
 		// Extract packet
 		UDPPacketMK dataPacket = new UDPPacketMK(receivePacket.getData());
 
 		// Add to empty file
 		this.newFileReceiver.addFilePacket(dataPacket);
+		if(dataPacket.getSeqNr() == currentWindow[1]-1) {
+			this.isReadyForCheck = true;
+			this.lastReceivedPacket = receivePacket;
+		}
+
+
+		if(this.isResending) {
+			//			this.resendWindow.remove(dataPacket.getSeqNr());
+			this.resendWindow2.put(dataPacket.getSeqNr(), true);
+			if(!this.resendWindow2.containsValue(false)) {
+				this.isResending = false;
+				this.isReadyForCheck = true;
+				checkAckWindow(receivePacket);
+			}
+		}
+
 	}
 
 	public void checkAckWindow(DatagramPacket receivePacket) throws IOException {
+		System.out.println("[RECEIVER]("+ getClass().getName() + ") Checking packets from " + (getCurrentWindow()[0] + 1) + " to " + (getCurrentWindow()[1]) + "\n");
+		//		this.isReadyForCheck = false;
 		// Extract packet
 		UDPPacketMK dataPacket = new UDPPacketMK(receivePacket.getData());
 
-		//TODO: ALSO CHECK AFTER CERTAIN AMOUNT OF TIME
-		if (dataPacket.getSeqNr() == getCurrentWindow()[1]-1) {
-			System.out.println("[RECEIVER]("+ getClass().getName() + ") Checking packets from " + getCurrentWindow()[0] + " to " + (getCurrentWindow()[1]-1) + "\n");
-			boolean isReadyForNextBatch = true;
+		//		if (dataPacket.getSeqNr() == getCurrentWindow()[1]-1) {
+		//		this.resendWindow = new ArrayList<Integer>();
+		this.resendWindow2 = new HashMap<Integer,Boolean>();
 
-			
-			for (int i = getCurrentWindow()[0]; i < getCurrentWindow()[1]; i++) {
-				if (this.newFileReceiver.getFilePacket(i) == null) {
-					System.out.println("[RECEIVER]("+ getClass().getName() + ") Packet nr " + i + " is missing");
-					isReadyForNextBatch = false;
-					//TODO: Ask for resend
-				}	
-			}
+		// Loop over files
+		for (int i = getCurrentWindow()[0]; i < getCurrentWindow()[1]; i++) {
+			// If a slot is still empty, go for a resend...
+			if (this.newFileReceiver.getFilePacket(i) == null) {
+				System.out.println("[RECEIVER]("+ getClass().getName() + ") Packet nr " + (i + 1) + " is missing.");
+				//				this.resendWindow.add(i);
+				this.resendWindow2.put(i, false);
 
-			if(isReadyForNextBatch) {
-				// Set new window
-				setCurrentWindow(new int[]{getCurrentWindow()[1], getCurrentWindow()[1]+WINDOWSIZE});
-				
-				// If window exceeds last packages, adjust window
-				if(getCurrentWindow()[1]+WINDOWSIZE > this.newFileReceiver.getAmountPackets()) {
-					setCurrentWindow(new int[]{getCurrentWindow()[0], this.newFileReceiver.getAmountPackets()});
-				}
-				
-				// Feedback on packages
-				System.out.println("[RECEIVER]("+ getClass().getName() + ") Batch arrived in good condition. New window from " + getCurrentWindow()[0] + " to " + getCurrentWindow()[1]);
-				UDPPacketMK transferAckPackageMK = protocolImp.createTransferACKPacket(dataPacket.getAmountPackets(), getCurrentWindow());
-				sendTransferAck(receivePacket, transferAckPackageMK);
+				this.isResending = true;
+				this.isReadyForNextBatch = false;
 			}
 		}
+
+		if (this.isResending) {
+			System.out.println("[RECEIVER]("+ getClass().getName() + ") Batch has not arrived in good condition. Resend of missing packages asked.");
+			int[] resendPackages = utils.Utils.hashSet2intArray(this.resendWindow2.keySet());
+			UDPPacketMK resendPackageMK = protocolImp.createTransferResendPacket(dataPacket.getAmountPackets(), resendPackages);
+			sendResend(receivePacket, resendPackageMK);
+			this.isReadyForCheck = false;
+			return;
+		} else {
+			this.isReadyForNextBatch = true;
+		}
+
+		// If all slots are filled, the new window will be set
+		if(isReadyForNextBatch) {
+			this.isReadyForCheck = false;
+
+			// Set new window
+			setCurrentWindow(new int[]{getCurrentWindow()[1], getCurrentWindow()[1]+WINDOWSIZE});
+
+			// If window exceeds last packages, adjust window
+			if(getCurrentWindow()[1]+WINDOWSIZE > this.newFileReceiver.getAmountPackets()) {
+				setCurrentWindow(new int[]{getCurrentWindow()[0], this.newFileReceiver.getAmountPackets()});
+			}
+
+			// Feedback on packages
+			System.out.println("[RECEIVER]("+ getClass().getName() + ") Batch arrived in good condition. New window from " + getCurrentWindow()[0] + " to " + getCurrentWindow()[1] +".");
+			UDPPacketMK transferAckPackageMK = protocolImp.createTransferACKPacket(dataPacket.getAmountPackets(), getCurrentWindow());
+			sendTransferAck(receivePacket, transferAckPackageMK);
+			//		} else if(this.resendWindow.size() > 0) {
+			//			
+		}
+		//		}
 	}
+
 
 	public void checkFinalFile(DatagramPacket receivePacket) {
 		System.out.println("[RECEIVER]("+ getClass().getName() + ") Jup... TODO... Checking full file. ALMOST THERE!!!\n");
@@ -272,6 +336,14 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 		this.dsock.send(transferAckPacket );
 	}
 
+	// TODO: Eigenlijk dubbelop...
+	public void sendResend(DatagramPacket receivePacket, UDPPacketMK resendPackageMK) throws IOException {
+		DatagramPacket resendPacket = new DatagramPacket(resendPackageMK.getAsRegularUDPData(),
+				resendPackageMK.getAsRegularUDPData().length,
+				receivePacket.getAddress(),
+				receivePacket.getPort());
+		this.dsock.send(resendPacket);
+	}
 
 	// TODO: packet receiving and sending in DataTransferProtocol
 	public void sendPacket(DatagramPacket packet) throws IllegalArgumentException {
@@ -312,14 +384,23 @@ public class FileReceiverThread extends Thread implements protocol.Constants {
 	public void setCurrentWindow(int[] currentWindow) {
 		this.currentWindow = currentWindow;
 	}
-	
-	
+
+
 	public int getHeaderLength() {
 		return headerLength;
 	}
 
 	public void setHeaderLength(int headerLength) {
 		this.headerLength = headerLength;
+	}
+
+
+	public boolean isReadyForCheck() {
+		return isReadyForCheck;
+	}
+
+	public void setLastAckPacket(DatagramPacket receiveTransferPacket) {
+		this.lastReceivedPacket = receiveTransferPacket;
 	}
 
 

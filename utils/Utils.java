@@ -29,69 +29,9 @@ public class Utils implements protocol.Constants {
 	private Utils() {
 	}
 
-	//	/**
-	//	 * Helper method to get the current process ID
-	//	 *
-	//	 * @return process id
-	//	 */
-	//	public static int getProcessId() {
-	//		final String jvmName = ManagementFactory.getRuntimeMXBean().getName();
-	//		final int index = jvmName.indexOf('@');
-	//
-	//		if (index < 1) {
-	//			return 0;
-	//		}
-	//
-	//		try {
-	//			return Integer.parseInt(jvmName.substring(0, index));
-	//		} catch (NumberFormatException e) {
-	//			return 0;
-	//		}
-	//	}
-	//	/**
-	//	 * Gets the contents of the specified file.
-	//	 * @param id the file ID
-	//	 * @return the array of integers, representing the contents of the file to transmit
-	//	 */
-	//	public static Integer[] getFileContents(int id) {
-	//		File fileToTransmit = new File(String.format("rdtcInput%d.png", id));
-	//		try (FileInputStream fileStream = new FileInputStream(fileToTransmit)) {
-	//			Integer[] fileContents = new Integer[(int) fileToTransmit.length()];
-	//
-	//			for (int i = 0; i < fileContents.length; i++) {
-	//				int nextByte = fileStream.read();
-	//				if (nextByte == -1) {
-	//					throw new Exception("File size is smaller than reported");
-	//				}
-	//
-	//				fileContents[i] = nextByte;
-	//			}
-	//			return fileContents;
-	//		} catch (Exception e) {
-	//			System.err.println(e.getMessage());
-	//			System.err.println(e.getStackTrace());
-	//			return null;
-	//		}
-	//	}
-	//
-	//	/**
-	//	 * Writes the contents of the fileContents array to the specified file.
-	//	 * @param fileContents the contents to write
-	//	 * @param id the file ID
-	//	 */
-	//	public static void setFileContents(Integer[] fileContents, int id) {
-	//		File fileToWrite = new File(String.format("rdtcOutput%d.%d.png", id, Utils.getProcessId()));
-	//		try (FileOutputStream fileStream = new FileOutputStream(fileToWrite)) {
-	//			for (Integer fileContent : fileContents) {
-	//				fileStream.write(fileContent);
-	//			}
-	//		} catch (Exception e) {
-	//			System.err.println(e.getMessage());
-	//			System.err.println(e.getStackTrace());
-	//		}
-	//	}
-
-	/// TODO: HIER GEBLEVEN <--------
+	//--------------------------------------------------------
+	// CONVERSION UTILS
+	//--------------------------------------------------------
 	public static byte[] int2ByteArray(int value, int byteArrayLength) {
 		byte[] bytes = ByteBuffer.allocate(byteArrayLength).putInt(value).array();
 		//		int a = ByteBuffer.wrap(bytes).getInt();
@@ -137,17 +77,8 @@ public class Utils implements protocol.Constants {
 		buffer.flip();//need flip 
 		return buffer.getLong();
 	}
-
-	public static long createChecksumFile(File file) {
-		long checksumInputLength = file.length();
-		byte[] checksumInputContent = new byte[(int) checksumInputLength];
-		// TODO: read and arraycopy (see FileHost.java)?
-		CRC32 crc = new CRC32();
-		crc.update(checksumInputContent);
-		long checksum = crc.getValue();
-
-		return checksum;                                   
-	}
+	
+	
 
 	public static byte[] string2byteArray(String str) throws IOException {
 		// USING LENGTH/PAYLOAD ALGORITM, WITH int NUMBYTELP for storing length of string
@@ -198,6 +129,41 @@ public class Utils implements protocol.Constants {
 
 		return fileContent;
 	}
+	
+	public static int[] arrayList2intArray(List<Integer> integers) {
+	    int[] ret = new int[integers.size()];
+	    Iterator<Integer> iterator = integers.iterator();
+	    for (int i = 0; i < ret.length; i++)
+	    {
+	        ret[i] = iterator.next().intValue();
+	    }
+	    return ret;
+	}
+	
+	public static int[] hashSet2intArray(Set<Integer> integers) {
+	    int[] ret = new int[integers.size()];
+	    Iterator<Integer> iterator = integers.iterator();
+	    for (int i = 0; i < ret.length; i++)
+	    {
+	        ret[i] = iterator.next().intValue();
+	    }
+	    return ret;
+	}
+	
+	//--------------------------------------------------------
+	// OTHER UTILS
+	//--------------------------------------------------------
+	public static long createChecksumFile(File file) {
+		long checksumInputLength = file.length();
+		byte[] checksumInputContent = new byte[(int) checksumInputLength];
+		// TODO: read and arraycopy (see FileHost.java)?
+		CRC32 crc = new CRC32();
+		crc.update(checksumInputContent);
+		long checksum = crc.getValue();
+
+		return checksum;                                   
+	}
+
 
 
 	// TOT HIER <---------
@@ -224,6 +190,16 @@ public class Utils implements protocol.Constants {
 		} else {
 			return filename.substring(index + 1);
 		}
+	}
+	
+	public static int[] trimIntArray(int[] intArrayPadded) {
+		ArrayList<Integer> arrayList = new ArrayList<Integer>();
+		for (int i = 0; i < intArrayPadded.length; i++) {
+	        if(intArrayPadded[i] != 0) {
+	        	arrayList.add(intArrayPadded[i]);
+	        }
+	    }
+		return arrayList2intArray(arrayList);
 	}
 
 }

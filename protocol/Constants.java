@@ -12,9 +12,12 @@ public interface Constants {
 	public static final int MAXDATASIZEPACKET = 1024; //bytes
 	public static final int WINDOWSIZE = 5; //packets
 
-	public static final int ACKTIMEOUT = 120000; //milliseconds
-	public static final int BROADCASTTIMEOUT = 5000; //milliseconds
+	public static final int ACKTIMEOUT = 1000*10; //milliseconds
+	public static final int BROADCASTTIMEOUT = 1000*12; //milliseconds
+	public static final int SERVERTIMEOUT = 1000*60*10; //millisecconds
 	public static final int NUMBYTESLP = 4;
+	
+	public static final int MAXTIMEOUTS = 5;
 
 	// Delimiters
 	public static final String DELIMITER = " ";

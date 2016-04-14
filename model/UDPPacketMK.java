@@ -133,6 +133,10 @@ public class UDPPacketMK {
 				setTransferAckHeader(amountPackets, newWindow);
 				setPacketData(new byte[0]);
 				break;
+			case RESEND:
+				setResendHeader(amountPackets, newWindow);
+				setPacketData(new byte[0]);
+				break;
 			}
 		} catch (IOException e) {
 			System.out.println("Error in constructing set-up packet");
@@ -301,6 +305,16 @@ public class UDPPacketMK {
 		//		this.checksumData = 5;
 		createSubHeader();
 	}
+	
+	public void setResendHeader(int amountPackets, int[] resendPackages) throws IOException {
+		this.flag = Flag.RESEND;
+		this.amountPackets = amountPackets;
+		this.seqNr = -1;
+		this.acknowlegdment = resendPackages; 
+		this.window = new int[1];
+		this.dataLength = 0;
+		createSubHeader();
+	}
 
 	public void setTransferFinalHeader(int amountPackets) throws IOException {
 		//Subheader, based on TCP-header
@@ -444,6 +458,10 @@ public class UDPPacketMK {
 
 	public int getDataLength() {
 		return this.dataLength;
+	}
+	
+	public int[] getAcknowlegdment() {
+		return this.acknowlegdment;
 	}
 
 }

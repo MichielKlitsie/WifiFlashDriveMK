@@ -31,13 +31,14 @@ public class PacketParser {
 		// Interpret packet as UDPPacketMK
 		UDPPacketMK subPacket = new UDPPacketMK(receivePacket.getData());
 		Flag flag = subPacket.getFlag();
-		//		System.out.println("[RECEIVER]("+ getClass().getName() + ") Parsing packet with flag: " + flag);
+		System.out.println("[RECEIVER]("+ getClass().getName() + ") Parsing packet with flag: " + flag);
 
 		switch(flag) {
 		case WAIT:
 			System.out.println("[RECEIVER]("+ getClass().getName() + ") Waiting for a package" + "\n");
 			break;
 		case SETUP:
+			fileReceiverThread.setLastAckPacket(receivePacket);
 			System.out.println("[RECEIVER]("+ getClass().getName() + ") Setup-packet received from " + receivePacket.getAddress() + ":" +receivePacket.getPort());
 			fileReceiverThread.setupFileTransfer(receivePacket);
 			//			fileReceiverThread.setupFileTransfer(receivePacket);
@@ -54,10 +55,18 @@ public class PacketParser {
 //						System.out.println("[RECEIVER]("+ getClass().getName() + ") Data-packet received from " + receivePacket.getAddress() + ":" +receivePacket.getPort());
 			if (fileReceiverThread.checkChecksumPacket(receivePacket)) {
 				fileReceiverThread.writeDataPacket(receivePacket);
-				fileReceiverThread.checkAckWindow(receivePacket);
+				
+				if(fileReceiverThread.isReadyForCheck()) {
+					fileReceiverThread.setLastAckPacket(receivePacket);
+					fileReceiverThread.checkAckWindow(receivePacket);
+				}
 			} else {
 				// Request packet again...
 				System.out.println("[SENDER]("+ getClass().getName() + ") Packet was damaged.\n");
+				//
+				// TODO:				
+				// ASK FOR RESEND
+				//
 			}
 			break;
 		case TRANSFERFINAL:

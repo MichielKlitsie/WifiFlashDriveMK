@@ -22,6 +22,7 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 	//--------------------------------------------------------
 	private FileHost host;
 	private ArrayList<InetAddress> discoveredAddresses;
+	private boolean initialDiscoverySend;
 
 	//--------------------------------------------------------
 	// CONSTRUCTOR
@@ -30,8 +31,9 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 		super("DiscoveryThread");
 		this.host = host;
 		this.discoveredAddresses = new ArrayList<InetAddress>();
+		this.initialDiscoverySend = false;
 	}
-	
+
 	//--------------------------------------------------------
 	// RUN
 	//--------------------------------------------------------
@@ -44,34 +46,37 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 			socket = new DatagramSocket(DISCOVERYPORT, InetAddress.getByName("0.0.0.0"));
 			socket.setBroadcast(true);
 
-
-			//			
-			//			Timeout.Start();
-			//			Timeout.SetTimeout(1000, new DataTransferProtocol(), 28);
-
-
 			while (true) {
-				System.out.println("[BROADCAST] (" + getClass().getName() + ") Ready to receive broadcast packets!\n");
+				if(!initialDiscoverySend) {
+					sendDiscoveryBroadcast(); //Initial list
+					System.out.println("[BROADCAST] (" + getClass().getName() + ") Ready to receive new incoming broadcast packets!");
+					this.initialDiscoverySend = true;
+				}
+				
 				//Receive a packet
 				byte[] recvBuf = new byte[15000];
 				DatagramPacket packet = new DatagramPacket(recvBuf, recvBuf.length);
 				socket.receive(packet);
 
 				//Packet received
-				System.out.println("[BROADCAST] (" + getClass().getName() + ") Discovery packet received from: " + packet.getAddress().getHostAddress());
-				//				System.out.println("[BROADCAST] (" + getClass().getName() + ") Packet received; data: " + new String(packet.getData()));
+				if(!packet.getAddress().getHostAddress().equals(InetAddress.getLocalHost().getHostAddress())) {
+					System.out.println("[BROADCAST] (" + getClass().getName() + ") Discovery packet received from: " + packet.getAddress().getHostAddress());
+					//				System.out.println("[BROADCAST] (" + getClass().getName() + ") Packet received; data: " + new String(packet.getData()));
 
-				//See if the packet holds the right command (message)
-				String message = new String(packet.getData()).trim();
-				if (message.equals(DISCOVER_REQUEST)) {
-					byte[] sendData = DISCOVER_RESPONSE.getBytes();
+					//See if the packet holds the right command (message)
+					String message = new String(packet.getData()).trim();
+					if (message.equals(DISCOVER_REQUEST)) {
+						byte[] sendData = DISCOVER_RESPONSE.getBytes();
 
-					//Send a response
-					DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, packet.getAddress(), packet.getPort());
-					socket.send(sendPacket);
+						//Send a response
+						DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, packet.getAddress(), packet.getPort());
+						socket.send(sendPacket);
 
-					System.out.println("[BROADCAST] (" + getClass().getName() + ") Response packet to: " + sendPacket.getAddress().getHostAddress());
+						System.out.println("[BROADCAST] (" + getClass().getName() + ") Response packet to: " + sendPacket.getAddress().getHostAddress());
+					}
 				}
+				
+				
 			}
 		} catch (IOException ex) {
 			Logger.getLogger(DiscoveryThread.class.getName()).log(Level.SEVERE, null, ex);
@@ -91,6 +96,9 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 	// SEND BROADCAST MESSAGE TO LOOK FOR MACHINES
 	//--------------------------------------------------------
 	public void sendDiscoveryBroadcast() {
+		// Clear previous addresses
+		this.discoveredAddresses = new ArrayList<InetAddress>();
+
 		// Find the server using UDP broadcast
 		try {
 			//Open a random port to send the package
@@ -131,7 +139,7 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 					} catch (Exception e) {
 					}
 
-					System.out.println("[BROADCAST](" + getClass().getName() + ") Request packet sent to: " + broadcast.getHostAddress() + "; Interface: " + networkInterface.getDisplayName() + "\n");
+					System.out.println("[BROADCAST](" + getClass().getName() + ") Request packet sent to: " + broadcast.getHostAddress() + "; Interface: " + networkInterface.getDisplayName());
 				}
 			}
 
@@ -143,40 +151,59 @@ public class DiscoveryThread extends Thread implements protocol.Constants {
 
 			// for a few seconds
 			discoverSocket.setSoTimeout(BROADCASTTIMEOUT);
-			//			while (true) {
-			try {
-				discoverSocket.receive(receivePacket);
+			boolean isReceivingBroadcast = true;
+			while (isReceivingBroadcast) {
+				try {
+					discoverSocket.receive(receivePacket);
+					//We have a response
+					if(!receivePacket.getAddress().getHostAddress().equals(InetAddress.getLocalHost().getHostAddress())) {
+						System.out.println("[BROADCAST](" + getClass().getName() + ") Broadcast response from machine: " + receivePacket.getAddress().getHostAddress() + " or " + receivePacket.getSocketAddress());
 
-				//We have a response
-				System.out.println("[BROADCAST](" + getClass().getName() + ") Broadcast response from machine: " + receivePacket.getAddress().getHostAddress() + " or " + receivePacket.getSocketAddress());
+						//Check if the message is correct
+						String message = new String(receivePacket.getData()).trim();
+						if (message.equals(DISCOVER_RESPONSE)) {
+							//DO SOMETHING WITH THE SERVER'S IP (for example, store it in your controller)
+							this.discoveredAddresses.add(receivePacket.getAddress());
+							System.out.println("[BROADCAST](" + getClass().getName() + ") Response was correct.");
+						} else {
+							System.out.println("[BROADCAST](" + getClass().getName() + ") Response was not correct.");
+						}
 
-				//Check if the message is correct
-				String message = new String(receivePacket.getData()).trim();
-				if (message.equals(DISCOVER_RESPONSE)) {
-					//DO SOMETHING WITH THE SERVER'S IP (for example, store it in your controller)
-					this.discoveredAddresses.add(receivePacket.getAddress());
-					System.out.println("[BROADCAST](" + getClass().getName() + ") Response was correct.\n");
-				} else {
-					System.out.println("[BROADCAST](" + getClass().getName() + ") Response was not correct.\n");
+					}
+				} catch (SocketTimeoutException e) {
+					System.out.println("[BROADCAST](" + getClass().getName() + ") Broadcast stopped receiving after " + BROADCASTTIMEOUT + " milliseconds.\n");
+					isReceivingBroadcast = false;
+					discoverSocket.close();	
+				} finally {
+
 				}
-			} catch (SocketTimeoutException e) {
-				System.out.println("[BROADCAST](" + getClass().getName() + ") No response on broadcast within " + BROADCASTTIMEOUT + " milliseconds.\n");
-			} finally {
-				discoverSocket.close();		
 			}
-			//			}
 
 			//Close the port!
+			displayDiscoveredAddresses(this.discoveredAddresses);
 
 		} catch (IOException ex) {
 			//		  Logger.getLogger(LoginWindow.class.getName()).log(Level.SEVERE, null, ex);
 			ex.printStackTrace();
 		}
 	}
+
+	public void displayDiscoveredAddresses(ArrayList<InetAddress> addresses) {
+		String strList = ""; 
+		for (InetAddress address : addresses) {
+			strList = strList + " - " + address.getHostAddress() + "\n";
+		}
+		System.out.println("[BROADCAST](" + getClass().getName() + ") IP-Addresses found:\n" + strList);
+
+	}
+
 	//--------------------------------------------------------
 	// GETTERS AND SETTERS
 	//--------------------------------------------------------
 
+	public ArrayList<InetAddress> getDiscoveredAddresses() {
+		return this.discoveredAddresses;
+	}
 }
 
 

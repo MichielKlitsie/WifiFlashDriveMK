@@ -28,12 +28,14 @@ import java.util.Scanner;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Logger;
 import java.util.zip.CRC32;
+
 import java.net.NetworkInterface;
 
 import model.Flag;
 import model.UDPPacketMK;
 import protocol.DataTransferProtocol;
 import utils.Utils;
+import utils.Timer;
 
 /**
  * FileClient that runs on the sending machine.
@@ -115,7 +117,7 @@ public class FileHost extends Thread implements protocol.Constants {
 	private FileSenderThread fileSenderHandler;
 
 	private String dataPath;
-
+	private Timer timerHost;
 	//--------------------------------------------------------
 	// CONSTRUCTOR
 	//--------------------------------------------------------
@@ -124,7 +126,8 @@ public class FileHost extends Thread implements protocol.Constants {
 		this.LocalIPAddress = InetAddress.getLocalHost();
 		this.dataPath = new File(System.getProperty("user.dir")).getAbsolutePath();
 
-//		displayInterfaces();
+		this.macID = generateMacAddress();
+		displayInterfaces();
 		displayHostInfo();
 
 		//		Utils.Timeout.Start();
@@ -134,6 +137,7 @@ public class FileHost extends Thread implements protocol.Constants {
 		// 1. Open a discovery thread for broadcast receiving on discovery port
 		this.discoveryThread = new DiscoveryThread(this);
 		discoveryThread.start();
+		
 
 		// 2. Open a file transfer thread for listening to filetransfer port
 		this.fileReceiverThread = new FileReceiverThread(this);
@@ -142,6 +146,16 @@ public class FileHost extends Thread implements protocol.Constants {
 		// 3. Open a user input thread for communicating command line
 		this.inputThread = new ClientInputThread(this);
 		inputThread.start();
+		
+		// Start timer
+		this.timerHost = new Timer(SERVERTIMEOUT) {
+			@Override
+			public void timeout() {
+				System.err.println ("[SENDER]("+ getClass().getName() + ") Server timeout occurred after " + (this.getTimeElapsed()/1000) + " seconds. Shutting down...");
+				shutdown();
+			}
+		};
+		timerHost.start();
 	}
 
 	//--------------------------------------------------------
@@ -252,36 +266,38 @@ public class FileHost extends Thread implements protocol.Constants {
 	 * Stops the client, and disconnects it from the server.
 	 */
 	public void shutdown() {
-		//		Utils.Timeout.Stop();
-
-		//		try {
-		//			socket.setTcpNoDelay(true);
-		//
-		//			// upload checksum of the received file
-		//			if (!isSender) {
-		//				sendChecksum("OUT", String.format("rdtcOutput%d.%d.png", fileID, Utils.getProcessId()));
-		//			}
-		//
-		//			// stop simulation
-		//			//			simulationStarted = false;
-		//			//			simulationFinished = true;
-		//
-		//			// stop the message loop
-		//			eventLoopThread.interrupt();
-		//			try {
-		//				eventLoopThread.join();
-		//			} catch (InterruptedException e) {
-		//				e.printStackTrace();
-		//			}
-		//
-		//			// close comms
-		//			sendControlMessage("CLOSED");
-		//			socket.getOutputStream().flush();
-		//			Thread.sleep(1000);
-		//			socket.close();
-		//		} catch (IOException | InterruptedException e) {
-		//			e.printStackTrace();
-		//		}
+		showStateThreads();
+		System.out.println("[HOST] ("+ getClass().getName() + ") Killing threads...\n");
+		if (discoveryThread.isAlive()) {
+			discoveryThread.interrupt();
+		}
+		if (fileReceiverThread.isAlive()) {
+			fileReceiverThread.interrupt();
+		}
+		if (inputThread.isAlive()) {
+			fileReceiverThread.interrupt();
+		}
+		if (fileSenderHandler != null) {
+			fileReceiverThread.interrupt();
+		}
+		
+		showStateThreads();
+		System.exit(1);
+	}
+	
+	public void showStateThreads() {
+		if (discoveryThread.isAlive()) {
+			System.out.println(discoveryThread.getName() + " State: " + discoveryThread.getState());
+		}
+		if (fileReceiverThread.isAlive()) {
+			System.out.println(fileReceiverThread.getName() + " State: " + fileReceiverThread.getState());
+		}
+		if (inputThread.isAlive()) {
+			System.out.println(inputThread.getName() + " State: " + inputThread.getState());
+		}
+		if (fileSenderHandler != null ) {
+			System.out.println(fileSenderHandler.getName() + " State: " + fileSenderHandler.getState() +"\n");
+		}
 	}
 
 	//--------------------------------------------------------
@@ -324,6 +340,8 @@ public class FileHost extends Thread implements protocol.Constants {
 		return this.dataPath;
 	}
 
-
+	public void resetTimer() {
+		this.timerHost.reset();
+	}
 
 }
